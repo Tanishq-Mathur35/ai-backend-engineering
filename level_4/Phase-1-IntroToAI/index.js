@@ -3,7 +3,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai"
 import dotenv from "dotenv"
 import express from "express"
 import { ChatGroq } from "@langchain/groq"
-import { Annotation, MessagesAnnotation, StateGraph } from "@langchain/langgraph"
+import { Annotation, MemorySaver, MessagesAnnotation, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import { TavilySearch } from "@langchain/tavily"
 
@@ -48,20 +48,20 @@ app.post("/ai", async (req, res) => {
 
 // WITH LANGCHAIN - LANGGRAPH
 const tool = new TavilySearch({
-    maxResults: 2,
+    maxResults: 10,
     topic: "general"
 })
+
+const checkPointer = new MemorySaver()
 
 const tools = [tool]
 const toolNode = new ToolNode(tools)
 
 
 const llm = new ChatGroq({
-    model: "llama-3.3-70b-versatile",
-    temperature: 0.7,
-    maxTokens: 100,
-    maxRetries:2
-}).bindTools(tools)
+    model: "llama-3.1-8b-instant",
+    temperature: 0,
+}).bindTools(tools);
 
 
 app.post("/langchain-ai", async (req, res) => {
@@ -107,12 +107,12 @@ const callLLM = async (state) => {
 
 const shouldContinue = async (state) => {
     const lastMessage = state.messages[state.messages.length - 1]
-    if (lastMessage.tool_calls.length > 0) {
+
+    if (lastMessage.tool_calls?.length > 0) {
         return "tools"
     }
-    else {
-        "__end__"
-    }
+
+    return "__end__"
 }
 
 const graph = new StateGraph(MessagesAnnotation)
@@ -121,7 +121,7 @@ const graph = new StateGraph(MessagesAnnotation)
     .addEdge("__start__", "agent")
     .addEdge("tools", "agent")
     .addConditionalEdges("agent", shouldContinue)
-    .compile()
+    .compile({checkpointer: checkPointer})
 
 
 app.post("/langgraph-ai", async (req, res) => {
@@ -132,8 +132,12 @@ app.post("/langgraph-ai", async (req, res) => {
             role: "user",
             content: input
         }
-    ]})
-    console.log(response)
+        ]
+    },
+        {
+            configurable: { thread_id: "user123" }
+        })
+    console.log(response.messages)
 
     return res.status(200).json({ "Langgraph-ai": response.messages[response.messages.length - 1].content })
 })
