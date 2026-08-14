@@ -1,4 +1,5 @@
 import { TaskType } from "@google/generative-ai"
+import { HumanMessage, SystemMessage } from "@langchain/core/messages"
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai"
 import { ChatGroq } from "@langchain/groq"
 import { QdrantVectorStore } from "@langchain/qdrant"
@@ -62,10 +63,28 @@ const upload = async () => {
 app.post("/ai", async (req, res) => {
     const { input } = req.body
 
-    const response = await llm.invoke(
-        input
-    )
-    return res.status(200).json({ "ai:": response.content })
+    const docs = await vectorStore.similaritySearch(input, 5)
+
+    const context = docs.map((d) => d.pageContent).join("/n")
+
+    const response = await llm.invoke([
+        new SystemMessage(`You are a RAG AI assistant.
+
+    STRICT RULES:
+    - Answer ONLY from context
+    - Do not use outside knowledge
+    - If answer not found say:
+        "I don't know from uploaded PDF."
+
+    Context:
+    ${context}`
+        ),
+
+        new HumanMessage(input)
+    ])
+
+    console.log(response.content)
+    return res.status(200).json({ ai: response.content })
 })
 
 
